@@ -1,0 +1,155 @@
+---
+# Day-0 bootstrap: k3s -> ArgoCD -> root Application.
+# Everything after this is managed by ArgoCD from this repo's k8s/ tree.
+# Workstation access goes via Tailscale API proxy (ticket 7525538279718916096).
+
+- name: Day-0 bootstrap of single-node k3s
+  hosts: jojee
+  become: true
+  gather_facts: true
+
+  vars:
+    k3s_install_exec: >-
+      server
+      --disable=traefik
+      --disable=servicelb
+      --tls-san={{ cluster_fqdn }}
+
+  pre_tasks:
+    - name: Check deploy key
+      ansible.builtin.stat:
+        path: "{{ deploy_key_path }}"
+      delegate_to: localhost
+      become: false
+      register: deploy_key_stat
+
+    - name: Assert deploy key exists
+      ansible.builtin.assert:
+        that:
+          - deploy_key_stat.stat.exists
+        fail_msg: >-
+          Deploy key not found at {{ deploy_key_path }}.
+          Create a GitHub deploy key first and put it there.
+        quiet: true
+
+  tasks:
+    # ------------------------------------------------------------ k3s ---
+    - name: Check for existing k3s binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_bin
+
+    - name: Install k3s (pinned version)
+      when: not k3s_bin.stat.exists
+      ansible.builtin.shell: |
+        curl -sfL https://get.k3s.io | \
+          INSTALL_K3S_VERSION="{{ k3s_version | replace('+', '%2B') }}" \
+          sh -s - {{ k3s_install_exec }}
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for node to become ready
+      ansible.builtin.command: >-
+        k3s kubectl wait --for=condition=Ready
+        node/{{ ansible_hostname }} --timeout=300s
+      changed_when: false
+
+    # --------------------------------------------- ArgoCD bootstrap ---
+    - name: Fetch kubeconfig to control node (bootstrap only)
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ playbook_dir }}/.k3s-kubeconfig.remote.yaml"
+        flat: true
+
+    - name: Place temp kubeconfig with public address
+      delegate_to: localhost
+      become: false
+      ansible.builtin.copy:
+        dest: "{{ bootstrap_kubeconfig }}"
+        mode: "0600"
+        content: >-
+          {{ lookup('ansible.builtin.file',
+              playbook_dir ~ '/.k3s-kubeconfig.remote.yaml') |
+              regex_replace('127\.0\.0\.1', cluster_fqdn) }}
+
+    - name: Remove fetched file (remote side)
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/.k3s-kubeconfig.remote.yaml"
+        state: absent
+      delegate_to: localhost
+      become: false
+
+    - name: Ensure argocd namespace
+      ansible.builtin.command: k3s kubectl create namespace argocd
+      register: ns_created
+      failed_when: >-
+        ns_created.rc not in [0] and
+        'already exists' not in ns_created.stderr
+      changed_when: ns_created.rc == 0
+
+    - name: Install ArgoCD (pinned manifest)
+      delegate_to: localhost
+      become: false
+      kubernetes.core.k8s:
+        kubeconfig: "{{ bootstrap_kubeconfig }}"
+        state: present
+        apply: true
+        server_side_apply:
+          field_manager: ansible
+          force_conflicts: true
+        src: https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/install.yaml
+
+    - name: Wait for argocd-server
+      delegate_to: localhost
+      become: false
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ bootstrap_kubeconfig }}"
+        api_version: apps/v1
+        kind: Deployment
+        name: argocd-server
+        namespace: argocd
+        wait: true
+        wait_timeout: 300
+
+    - name: Register GitHub deploy key as ArgoCD repo secret
+      delegate_to: localhost
+      become: false
+      kubernetes.core.k8s:
+        kubeconfig: "{{ bootstrap_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: home-config-repo
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: "{{ git_repo_ssh }}"
+            sshPrivateKey: "{{ lookup('ansible.builtin.file', deploy_key_path) }}"
+
+    - name: Apply root Application (app-of-apps)
+      delegate_to: localhost
+      become: false
+      kubernetes.core.k8s:
+        kubeconfig: "{{ bootstrap_kubeconfig }}"
+        state: present
+        src: "{{ playbook_dir }}/../k8s/bootstrap/root.yaml"
+
+  post_tasks:
+    - name: Remove bootstrap kubeconfig from control node
+      ansible.builtin.file:
+        path: "{{ bootstrap_kubeconfig }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+
+    - name: Last tasks you do by hand
+      delegate_to: localhost
+      become: false
+      ansible.builtin.debug:
+        msg:
+          - "1. Install Tailscale + tailscale operator: see README.md"
+          - "2. tailscale configure kubeconfig (see README.md)"

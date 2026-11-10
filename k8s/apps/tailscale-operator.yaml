@@ -1,0 +1,34 @@
+# ---
+# Tailscale operator: auth-mode kube API proxy (ticket 7525538279718916096).
+# Prerequisite: a Secret `tailscale` in ns `tailscale` with keys
+# oauth_client_id / oauth_client_secret (moves to k8s/secrets/ via SOPS
+# once KSOPS is enabled; until then create manually).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://pkgs.tailscale.com/helmcharts
+    chart: tailscale-operator
+    targetRevision: 1.104.4
+    helm:
+      values: |
+        apiServerProxyConfig:
+          mode: "true"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet     # operator manages its own image bumps
+      jsonPointers:
+        - /spec/template/spec/containers

@@ -1,0 +1,16 @@
+---
+# Day-0 pinned versions
+k3s_version: "v1.37.2+k3s1"
+argocd_version: "v3.6.1"
+
+# Public DNS name of the Mini PC; must be covered by a k3s TLS SAN
+cluster_fqdn: "jojee.iptime.org"
+
+git_repo_ssh: "git@github.com:Jo-Jee/home-config.git"
+
+# Local path (on this control node) to the GitHub deploy key's PRIVATE part,
+# used only to create the ArgoCD repo secret. Keep the file out of git.
+deploy_key_path: "{{ playbook_dir }}/keys/home-config.deploykey"
+
+# Local temp kubeconfig used only during bootstrap (gitignored, safe to delete)
+bootstrap_kubeconfig: "{{ playbook_dir }}/.k3s-kubeconfig.yaml"

@@ -1,0 +1,13 @@
+# Day-0 bootstrap local state (never commit)
+ansible/.k3s-kubeconfig.yaml
+ansible/keys/
+*.env
+
+# Secret plaintext should never exist; only SOPS-encrypted files are committed
+k8s/secrets/*.dec.yaml
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

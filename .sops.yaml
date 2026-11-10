@@ -1,0 +1,16 @@
+# SOPS + age encryption rules.
+# Files under k8s/secrets/ are committed in encrypted form; ArgoCD (KSOPS)
+# decrypts them at sync time using the age key stored as a k8s Secret.
+#
+# TODO: replace both placeholders with real public keys after running:
+#   age-keygen -o ~/.config/sops/age/keys.txt          # workstation key
+#   age-keygen -o ansible/keys/age-argocd.key          # ArgoCD key (becomes k8s Secret)
+keys:
+  - &age_argocd REPLACE_WITH_ARGOCD_AGE_PUBLIC_KEY
+  - &age_workstation REPLACE_WITH_WORKSTATION_AGE_PUBLIC_KEY
+creation_rules:
+  - path_regex: k8s/secrets/.*\.yaml$
+    key_groups:
+      - age:
+          - *age_argocd
+          - *age_workstation

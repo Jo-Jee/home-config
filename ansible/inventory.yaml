@@ -1,0 +1,6 @@
+jojee:
+  hosts:
+    home:
+      ansible_host: jojee.iptime.org
+      ansible_port: 11022
+      ansible_user: jojee

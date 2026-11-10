@@ -1,0 +1,27 @@
+---
+# Root Application (app-of-apps). Created by the Ansible day-0 bootstrap.
+# Watches k8s/apps/ in this repo; every Application YAML there becomes a
+# deployed set of resources. Add new apps by committing files — no Ansible.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Jo-Jee/home-config.git
+    targetRevision: main
+    path: k8s/apps
+    directory:
+      recurse: true
+      include: "*.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
